@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Dhunuchi Balance</title>
+<style>
+:root{--night:#120d24;--ember:#ffb02e;--sindoor:#e0352b;--shankha:#f6efe3;--ink:#1c1530}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;touch-action:none}
+html,body{margin:0;height:100%;overflow:hidden;overscroll-behavior:none;background:var(--night);color:var(--shankha);font-family:"Palatino Linotype",Palatino,"Book Antiqua",Georgia,"Noto Serif Bengali","Nirmala UI","Bangla MN",serif}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+#hud{position:fixed;left:0;right:0;top:0;padding:max(14px,env(safe-area-inset-top)) 18px 0;display:flex;justify-content:space-between;align-items:flex-start;pointer-events:none;opacity:0;transition:opacity .3s}
+body[data-m=play] #hud,body[data-m=over] #hud{opacity:1}
+#time{font-size:44px;line-height:1;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ember);text-shadow:0 0 18px rgba(255,150,30,.5)}
+.sub{font-size:13px;opacity:.7;margin-top:2px}
+#lvl{font-size:20px;font-weight:700;padding-top:6px;text-align:center}
+.r{text-align:right;font-size:14px}
+#mute{pointer-events:auto;margin-top:6px;background:rgba(246,239,227,.12);color:var(--shankha);border:1px solid rgba(246,239,227,.3);border-radius:999px;width:40px;height:40px;font-size:18px}
+#mute[aria-pressed=true]{opacity:.4;text-decoration:line-through}
+#toast{position:fixed;left:0;right:0;top:22%;text-align:center;font-size:34px;font-weight:700;color:var(--ember);text-shadow:0 0 24px rgba(255,120,20,.8);opacity:0;pointer-events:none}
+#toast.show{animation:tst 1.3s ease-out}
+@keyframes tst{0%{opacity:0;transform:scale(.8)}15%{opacity:1;transform:scale(1.05)}70%{opacity:1}100%{opacity:0;transform:scale(1)}}
+#count{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:flex-end;padding-bottom:12vh;pointer-events:none;text-align:center}
+#count b{font-size:96px;line-height:1;color:var(--ember);text-shadow:0 0 30px rgba(255,140,30,.7)}
+#count span{font-size:18px;max-width:300px;opacity:.9;margin-top:8px}
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:linear-gradient(rgba(18,13,36,.55),rgba(18,13,36,.9))}
+.screen[hidden]{display:none}
+h1{margin:0;font-size:clamp(54px,16vw,92px);line-height:1;color:var(--ember);text-shadow:0 0 30px rgba(255,130,20,.55)}
+h2{margin:0;font-size:30px}
+p{margin:0;max-width:340px;line-height:1.5;font-size:17px}
+.note{font-size:14px;opacity:.75;min-height:20px}
+button.go{border:0;border-radius:999px;padding:16px 30px;font:700 19px inherit;font-family:inherit;color:var(--ink);background:linear-gradient(#ffd25a,#ff9a1f);box-shadow:0 8px 26px rgba(255,140,20,.4);touch-action:manipulation}
+button.alt{background:none;border:1px solid rgba(246,239,227,.4);color:var(--shankha);box-shadow:none;font-size:16px;padding:12px 22px}
+.row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+#score{font-size:64px;font-weight:700;color:var(--ember);line-height:1;font-variant-numeric:tabular-nums}
+#board{list-style:none;margin:0;padding:0;width:min(300px,86vw);font-size:17px}
+#board li{display:flex;justify-content:space-between;padding:7px 12px;border-bottom:1px solid rgba(246,239,227,.15)}
+#board li.me{background:rgba(255,176,46,.18);border-radius:8px;border-color:transparent}
+</style>
+</head>
+<body data-m="menu">
+<canvas id="c"></canvas>
+<div id="hud">
+  <div><div id="time">0.0</div><div class="sub">seconds</div></div>
+  <div id="lvl"></div>
+  <div class="r"><div id="best"></div><button id="mute" aria-label="Toggle sound" aria-pressed="false">♪</button></div>
+</div>
+<div id="toast"></div>
+<div id="count"><b id="cn">3</b><span>Rest the phone flat on your palm</span></div>
+
+<section class="screen" id="menu">
+  <h1>ধুনুচি</h1>
+  <h2>Dhunuchi Balance</h2>
+  <p>Keep the flame inside the bowl. Rest your phone flat on your palm and tilt against the wind. Every second it blows harder and changes sides faster.</p>
+  <button class="go" id="start">Light the dhunuchi</button>
+  <div class="note" id="note"></div>
+</section>
+
+<section class="screen" id="over" hidden>
+  <h2>The flame spilled</h2>
+  <div id="score">0.0</div>
+  <div class="sub" id="lv"></div>
+  <ul id="board"></ul>
+  <div class="row">
+    <button class="go" id="next">Next player</button>
+    <button class="go alt" id="reset">Clear scores</button>
+  </div>
+</section>
+
+<script>
+(()=>{
+/* ---- Tuning: change these to make the game easier or harder ---- */
+const CFG={
+  maxTilt:22,        // degrees of tilt that give full control
+  control:5.2,       // control strength (higher = more responsive)
+  windStart:.9,      // starting wind strength
+  windGrow:.05,      // wind increase per second
+  windCap:4.4,       // wind never exceeds this (must stay below control to be winnable)
+  switchStart:3.2,   // seconds between wind direction flips at the start
+  switchMin:.75,     // fastest flip interval
+  graceOut:.25       // seconds the flame may stay outside before you are out
+};
+
+const $=id=>document.getElementById(id);
+const cv=$('c'),cx=cv.getContext('2d');
+let W,H,R,CX,CY;
+function resize(){const d=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;cv.width=W*d;cv.height=H*d;cx.setTransform(d,0,0,d,0,0);R=Math.min(W*.37,H*.34);CX=W/2;CY=H*.46}
+addEventListener('resize',resize);resize();
+
+/* ---- State ---- */
+const S={mode:'menu',t:0,x:0,y:0,vx:0,vy:0,wa:0,wtar:0,wt:3,kt:3,cd:0,beatT:0,beat:0,out:0,amp:0,acc:0,lvl:1,n:1,overT:0};
+const tilt={x:0,y:0},raw={g:0,b:0,has:false},base={g:0,b:0},keys={};
+let ptr=null,players=[],best=0,tm=0,lastVib=0,muted=false;
+try{best=+localStorage.getItem('dhunuchi-best')||0}catch(e){}
+
+/* ---- Input ---- */
+addEventListener('deviceorientation',e=>{if(e.gamma==null||e.beta==null)return;raw.g=e.gamma;raw.b=e.beta;raw.has=true});
+const ang=()=>(((screen.orientation&&screen.orientation.angle)||window.orientation||0)%360+360)%360;
+function sensor(){const g=raw.g-base.g,b=raw.b-base.b,a=ang();
+  if(a===90)return[b,-g];if(a===270)return[-b,g];if(a===180)return[-g,-b];return[g,b]}
+const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+function readInput(dt){
+  let tx=0,ty=0;
+  if(raw.has){const s=sensor();tx=s[0]/CFG.maxTilt;ty=s[1]/CFG.maxTilt}
+  if(ptr){tx=(ptr.x-CX)/R;ty=(ptr.y-CY)/R}
+  tx+=(keys.arrowright||keys.d?1:0)-(keys.arrowleft||keys.a?1:0);
+  ty+=(keys.arrowdown||keys.s?1:0)-(keys.arrowup||keys.w?1:0);
+  tx=cl(tx,-1,1);ty=cl(ty,-1,1);
+  const k=Math.min(1,dt*18);tilt.x+=(tx-tilt.x)*k;tilt.y+=(ty-tilt.y)*k;
+}
+cv.addEventListener('pointerdown',e=>{if(S.mode==='play'||S.mode==='count')ptr={x:e.clientX,y:e.clientY}});
+cv.addEventListener('pointermove',e=>{if(ptr)ptr={x:e.clientX,y:e.clientY}});
+['pointerup','pointercancel','pointerleave'].forEach(n=>cv.addEventListener(n,()=>ptr=null));
+addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true});
+addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+
+/* ---- Audio (synthesised, no files) ---- */
+let AC=null;
+function audioInit(){try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume()}catch(e){}}
+function tone(type,f0,f1,vol,dur){
+  if(!AC||muted)return;const t=AC.currentTime,o=AC.createOscillator(),g=AC.createGain();
+  o.type=type;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+  g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.001,t+dur);
+  o.connect(g);g.connect(AC.destination);o.start(t);o.stop(t+dur+.03)}
+$('mute').onclick=()=>{muted=!muted;$('mute').setAttribute('aria-pressed',muted)};
+
+/* ---- Particles ---- */
+function spr(r,g,b){const c=document.createElement('canvas');c.width=c.height=64;const k=c.getContext('2d'),q=k.createRadialGradient(32,32,0,32,32,32);
+  q.addColorStop(0,`rgba(${r},${g},${b},1)`);q.addColorStop(.4,`rgba(${r},${g},${b},.45)`);q.addColorStop(1,`rgba(${r},${g},${b},0)`);k.fillStyle=q;k.fillRect(0,0,64,64);return c}
+const SP=[spr(255,244,190),spr(255,170,45),spr(225,70,25)],SM=spr(190,180,175);
+const P=[];
+const rnd=()=>Math.random();
+function emit(dt,fx,fy,dist){
+  if(P.length>420)return;
+  const flare=1+Math.max(0,dist-.65)*1.6;
+  S.acc+=dt*170;
+  while(S.acc>=1){S.acc--;
+    P.push({t:0,k:0,m:.55+rnd()*.4,x:fx+(rnd()-.5)*R*.1,y:fy+(rnd()-.5)*R*.05,vx:S.vx*R*.3+(rnd()-.5)*R*.25,vy:-(R*.55+rnd()*R*.5)+S.vy*R*.2,s:R*(.13+rnd()*.07)*flare});}
+  if(rnd()<dt*18)P.push({t:1,k:0,m:1.6+rnd(),x:fx,y:fy-R*.2,vx:(rnd()-.5)*R*.25+Math.cos(S.wa)*R*.08,vy:-(R*.3+rnd()*R*.2),s:R*.1});
+  if(rnd()<dt*(5+(dist>.7?40:0)))P.push({t:2,k:0,m:.6+rnd()*.6,x:fx,y:fy-R*.1,vx:(rnd()-.5)*R*1.2,vy:-(R*.4+rnd()*R*1.2),s:2.2});
+}
+function burst(fx,fy){for(let i=0;i<70;i++){const a=rnd()*6.283,v=R*(.4+rnd()*1.6);
+  P.push({t:2,k:0,m:.6+rnd()*.9,x:fx,y:fy,vx:Math.cos(a)*v,vy:Math.sin(a)*v,s:2.5+rnd()*2})}}
+function stepP(dt){for(let i=P.length-1;i>=0;i--){const p=P[i];p.k+=dt;if(p.k>p.m){P[i]=P[P.length-1];P.pop();continue}
+  p.x+=p.vx*dt;p.y+=p.vy*dt;if(p.t===1)p.s+=R*.12*dt}}
+
+/* ---- Game flow ---- */
+function show(el,v){el.hidden=!v}
+function setMode(m){S.mode=m;document.body.dataset.m=m}
+function startCount(){show($('menu'),false);show($('over'),false);setMode('count');S.cd=3.2;$('count').style.display='flex';S.x=S.y=S.vx=S.vy=0;
+  setTimeout(()=>{if(!raw.has&&S.mode!=='menu')toast('No tilt sensor: drag on screen')},3500)}
+function begin(){$('count').style.display='none';Object.assign(S,{t:0,x:0,y:0,vx:0,vy:0,wa:rnd()*6.283,wt:2.6,kt:3,out:0,lvl:1,beatT:0,beat:0});S.wtar=S.wa;setMode('play')}
+function toast(t){const e=$('toast');e.textContent=t;e.classList.remove('show');void e.offsetWidth;e.classList.add('show')}
+function die(){
+  const sc=S.t;setMode('over');S.overT=0;
+  if(sc>best){best=sc;try{localStorage.setItem('dhunuchi-best',sc)}catch(e){}}
+  players.push({name:'Player '+S.n,score:sc,id:S.n});
+  const d=Math.hypot(S.x,S.y)||1;S.vx=S.x/d*Math.max(1.6,Math.hypot(S.vx,S.vy));S.vy=S.y/d*Math.max(1.6,Math.hypot(S.vx,S.vy));
+  burst(CX+S.x*R,CY+S.y*R);tone('sine',140,28,.8,.7);
+  if(navigator.vibrate)navigator.vibrate([80,40,160]);
+  setTimeout(showOver,1100)}
+function showOver(){
+  $('score').textContent=S.t.toFixed(1)+' s';$('lv').textContent='Reached level '+S.lvl+(S.t>=best&&S.t>0?' · new best!':'');
+  const sorted=[...players].sort((a,b)=>b.score-a.score).slice(0,6);
+  $('board').innerHTML=sorted.map((p,i)=>`<li class="${p.id===S.n?'me':''}"><span>${i+1}. ${p.name}</span><span>${p.score.toFixed(1)} s</span></li>`).join('');
+  show($('over'),true)}
+
+/* ---- Simulation ---- */
+function sim(dt){
+  S.t+=dt;const t=S.t;S.lvl=1+Math.floor(t/10);
+  S.wt-=dt;
+  if(S.wt<=0){S.wtar=S.wa+Math.PI+(rnd()-.5)*1.4;S.wt=Math.max(CFG.switchMin,CFG.switchStart*Math.exp(-t/40))}
+  const diff=Math.atan2(Math.sin(S.wtar-S.wa),Math.cos(S.wtar-S.wa)),turn=(1.6+t*.06)*dt;
+  S.wa+=cl(diff,-turn,turn);
+  const amp=Math.min(CFG.windStart+CFG.windGrow*t,CFG.windCap)*Math.min(1,t/1.5);S.amp=amp;
+  const gu=Math.min(.15+.012*t,1.2);
+  const gx=(Math.sin(t*3.1+1)+Math.sin(t*5.3))*.5*gu,gy=(Math.sin(t*2.7+4)+Math.sin(t*6.1+2))*.5*gu;
+  if(t>10){S.kt-=dt;if(S.kt<=0){const a=rnd()*6.283,m=.25+Math.min(t,90)*.012;S.vx+=Math.cos(a)*m;S.vy+=Math.sin(a)*m;S.kt=Math.max(.8,2.8-t*.03)}}
+  const ax=tilt.x*CFG.control+Math.cos(S.wa)*amp+gx,ay=tilt.y*CFG.control+Math.sin(S.wa)*amp+gy;
+  S.vx+=ax*dt;S.vy+=ay*dt;const dm=Math.exp(-1.1*dt);S.vx*=dm;S.vy*=dm;
+  S.x+=S.vx*dt;S.y+=S.vy*dt;
+  const dist=Math.hypot(S.x,S.y);
+  if(dist>1){S.out+=dt;if(S.out>CFG.graceOut)die()}else S.out=Math.max(0,S.out-dt*2);
+  if(dist>.88&&navigator.vibrate&&performance.now()-lastVib>350){lastVib=performance.now();navigator.vibrate(25)}
+  // dhak-like beat that speeds up with level
+  S.beatT-=dt;if(S.beatT<=0){const bpm=84+Math.min(S.lvl,15)*7;S.beatT+=60/bpm;const i=S.beat++%8;
+    if(i===0||i===3||i===5)tone('sine',170,50,.5,.2);else if(i%2)tone('triangle',760,320,.07,.07)}
+  const secs=t.toFixed(1);if($('time').textContent!==secs)$('time').textContent=secs;
+  const lt='Level '+S.lvl;if($('lvl').textContent!==lt){$('lvl').textContent=lt;if(S.lvl>1)toast(lt)}
+  $('best').textContent='Best '+best.toFixed(1)+' s';
+}
+function update(dt){
+  readInput(dt);
+  if(S.mode==='menu'||S.mode==='count'){if(raw.has){base.g=raw.g;base.b=raw.b}}
+  if(S.mode==='count'){S.cd-=dt;$('cn').textContent=Math.max(1,Math.ceil(S.cd-.2));if(S.cd<=.2)begin()}
+  else if(S.mode==='play')sim(dt);
+  else if(S.mode==='over'){S.x+=S.vx*dt;S.y+=S.vy*dt;S.vx*=1-dt*.4;S.vy*=1-dt*.4;S.overT+=dt}
+  else{S.x=Math.sin(tm*1.3)*.04;S.y=Math.cos(tm*1.1)*.03}
+  if(S.mode!=='play'&&S.mode!=='over'){S.vx=S.vy=0}
+  stepP(dt);
+}
+
+/* ---- Rendering ---- */
+const coals=Array.from({length:46},(_,i)=>{const a=i*2.399,r=Math.sqrt((i+.5)/46)*.9;return{x:Math.cos(a)*r,y:Math.sin(a)*r,s:.04+((i*7)%5)*.012,p:i*1.7}});
+function spriteAt(img,x,y,r,a){cx.globalAlpha=a;cx.drawImage(img,x-r,y-r,r*2,r*2)}
+function draw(){
+  cx.globalAlpha=1;cx.globalCompositeOperation='source-over';
+  const bg=cx.createRadialGradient(CX,CY,R*.3,CX,CY,Math.max(W,H)*.8);bg.addColorStop(0,'#241a3f');bg.addColorStop(1,'#0b0816');
+  cx.fillStyle=bg;cx.fillRect(0,0,W,H);
+  const fx=CX+S.x*R,fy=CY+S.y*R,dist=Math.hypot(S.x,S.y),fl=.85+Math.sin(tm*23)*.08+Math.sin(tm*9)*.07;
+  // clay body
+  cx.save();cx.shadowColor='rgba(0,0,0,.6)';cx.shadowBlur=30;cx.shadowOffsetY=12;
+  let g=cx.createRadialGradient(CX,CY,R,CX,CY,R*1.36);g.addColorStop(0,'#7a3318');g.addColorStop(.55,'#c4602f');g.addColorStop(1,'#8a3a1d');
+  cx.fillStyle=g;cx.beginPath();cx.arc(CX,CY,R*1.36,0,6.283);cx.fill();cx.restore();
+  // alpona (rice-paste) pattern on the rim
+  cx.strokeStyle='rgba(246,239,227,.38)';cx.lineWidth=1.5;
+  for(const r of[1.13,1.29]){cx.beginPath();cx.arc(CX,CY,R*r,0,6.283);cx.stroke()}
+  cx.fillStyle='rgba(246,239,227,.78)';
+  for(let i=0;i<28;i++){const a=i/28*6.283,x=CX+Math.cos(a)*R*1.21,y=CY+Math.sin(a)*R*1.21;
+    cx.beginPath();cx.ellipse(x,y,R*.045,R*.022,a,0,6.283);cx.fill()}
+  // bowl
+  g=cx.createRadialGradient(CX,CY,R*.2,CX,CY,R*1.07);g.addColorStop(0,'#2a140d');g.addColorStop(1,'#0f0806');
+  cx.fillStyle=g;cx.beginPath();cx.arc(CX,CY,R*1.07,0,6.283);cx.fill();
+  // coals
+  cx.globalCompositeOperation='lighter';
+  for(const c of coals){const a=.35+.35*Math.sin(tm*3+c.p);spriteAt(SP[2],CX+c.x*R,CY+c.y*R,c.s*R*2.4,a)}
+  // firelight on clay
+  spriteAt(SP[1],fx,fy,R*1.9,.2*fl);
+  cx.globalCompositeOperation='source-over';
+  // boundary ring: gold when safe, red when the flame nears the edge
+  const dg=cl((dist-.55)/.45,0,1);
+  cx.setLineDash([9,11]);cx.lineWidth=3.5;cx.strokeStyle=`rgb(${255-31*dg|0},${176-123*dg|0},${46-3*dg|0})`;
+  cx.shadowColor=dg>.4?'#e0352b':'transparent';cx.shadowBlur=dg*18*(1+Math.sin(tm*14)*.4);
+  cx.beginPath();cx.arc(CX,CY,R,0,6.283);cx.stroke();cx.setLineDash([]);cx.shadowBlur=0;
+  // wind arrow on the rim (where the flame is being pushed)
+  if(S.mode==='play'){
+    const s=(.8+S.amp/CFG.windCap*.9)*R/130,wx=CX+Math.cos(S.wa)*R*1.2,wy=CY+Math.sin(S.wa)*R*1.2;
+    cx.save();cx.translate(wx,wy);cx.rotate(S.wa);cx.scale(s,s);
+    cx.fillStyle='#ff4a3a';cx.shadowColor='#e0352b';cx.shadowBlur=14;
+    cx.beginPath();cx.moveTo(16,0);cx.lineTo(-9,-12);cx.lineTo(-4,0);cx.lineTo(-9,12);cx.closePath();cx.fill();cx.restore();cx.shadowBlur=0}
+  // smoke
+  for(const p of P)if(p.t===1){const k=p.k/p.m;spriteAt(SM,p.x,p.y,p.s*2,.13*(1-k))}
+  // flame + sparks
+  cx.globalCompositeOperation='lighter';
+  for(const p of P){const k=p.k/p.m;
+    if(p.t===0)spriteAt(SP[k<.28?0:k<.6?1:2],p.x,p.y,p.s*(1.15-k*.9)*2.2,(1-k)*.7);
+    else if(p.t===2){spriteAt(SP[k<.5?0:1],p.x,p.y,p.s*(1-k)*2.2,1-k)}}
+  spriteAt(SP[1],fx,fy-R*.08,R*.55*fl,.5);spriteAt(SP[0],fx,fy,R*.14*fl,.9);
+  cx.globalCompositeOperation='source-over';cx.globalAlpha=1;
+  // tilt bubble (shows how you are tilting the phone)
+  if(S.mode==='play'||S.mode==='count'){
+    const by=Math.min(H-52,CY+R*1.36+60),r=26;
+    cx.strokeStyle='rgba(246,239,227,.5)';cx.lineWidth=2;cx.beginPath();cx.arc(CX,by,r,0,6.283);cx.stroke();
+    cx.fillStyle='#ffb02e';cx.beginPath();cx.arc(CX+tilt.x*(r-6),by+tilt.y*(r-6),6,0,6.283);cx.fill()}
+}
+
+function frame(now){
+  const dt=Math.min(.033,(now-frame.l)/1000||.016);frame.l=now;tm=now/1000;
+  update(dt);
+  if(S.mode!=='over'||S.overT<1.1||true){emit(dt,CX+S.x*R,CY+S.y*R,Math.hypot(S.x,S.y))}
+  draw();requestAnimationFrame(frame)}
+frame.l=performance.now();requestAnimationFrame(frame);
+
+/* ---- UI wiring ---- */
+async function askSensor(){
+  const D=window.DeviceOrientationEvent;
+  if(D&&typeof D.requestPermission==='function'){
+    try{const r=await D.requestPermission();if(r!=='granted')$('note').textContent='Motion access denied. Drag on screen to play, or allow motion in browser settings.'}
+    catch(e){$('note').textContent='Could not get motion access. Drag on screen to play.'}}}
+$('start').onclick=async()=>{audioInit();await askSensor();try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}startCount()};
+$('next').onclick=()=>{S.n++;audioInit();startCount()};
+$('reset').onclick=()=>{players=[];S.n=1;$('board').innerHTML='';$('reset').blur()};
+setTimeout(()=>{$('note').textContent=raw.has?'Tilt sensor ready':'No tilt sensor detected. You can still drag on screen or use arrow keys.'},1200);
+})();
+</script>
+</body>
+</html>
